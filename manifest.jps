@@ -1,0 +1,418 @@
+{
+  "jpsType": "update",
+  "jpsVersion": "1.8",
+  "id": "synchro-addon",
+  "name": "Synchro Add-on v1.9.2",
+  "version": "1.9.2",
+  "logo": "images/icon.png",
+  "homepage": "https://github.com/shaundma/synchro-addon",
+  "description": "Synchronize files and folders between nodes using rsync",
+  "baseUrl": "https://raw.githubusercontent.com/shaundma/synchro-addon/master/",
+  "targetNodes": {
+    "nodeType": ["storage", "apache", "apache2", "nodejs", "apache-ruby", "apache-python", "nginxruby", "nginxphp", "nginxphp-dockerized", "tomcat6", "tomcat7", "tomcat8", "tomcat85", "tomcat9", "tomcat", "tomee", "tomee-dockerized", "litespeedphp", "llsmp", "lemp", "jetty", "mariadb", "mariadb10", "mysql5", "mysql8", "postgres", "postgresql", "docker", "centos-vps", "ubuntu-vps", "debian-vps", "memcached", "redis", "mongodb"]
+  },
+  "settings": {
+    "fields": [
+      {
+        "type": "string",
+        "name": "syncFolder",
+        "caption": "Folder on local",
+        "required": true,
+        "default": "/var/www/webroot/ROOT",
+        "placeholder": "/path/to/folder"
+      },
+      {
+        "type": "string",
+        "name": "localOwner",
+        "caption": "Local owner",
+        "required": false,
+        "placeholder": "e.g. jelastic (optional)"
+      },
+      {
+        "type": "string",
+        "name": "remoteSyncFolder",
+        "caption": "Folder on remote",
+        "required": true,
+        "default": "/var/www/webroot/ROOT",
+        "placeholder": "/path/to/folder"
+      },
+      {
+        "type": "radio-fieldset",
+        "name": "syncDirection",
+        "caption": "Sync Direction",
+        "default": "from",
+        "values": {
+          "from": "FROM local TO remote",
+          "to": "FROM remote TO local"
+        }
+      },
+      {
+        "type": "string",
+        "name": "remoteUser",
+        "caption": "Remote User",
+        "required": true,
+        "default": "root",
+        "placeholder": "e.g. root"
+      },
+      {
+        "type": "string",
+        "name": "remoteIP",
+        "caption": "Remote Node IP Address",
+        "required": true,
+        "placeholder": "e.g. 192.168.1.10"
+      },
+      {
+        "type": "radio-fieldset",
+        "name": "syncMode",
+        "caption": "Sync Mode",
+        "default": "onetime",
+        "values": [
+          {"value": "onetime", "caption": "One-time sync only"},
+          {"value": "automatic", "caption": "Automatic recurring sync"}
+        ]
+      },
+      {
+        "type": "spinner",
+        "name": "syncInterval",
+        "caption": "Every (minutes)",
+        "min": 1,
+        "max": 2880,
+        "default": 15,
+        "required": true
+      }
+    ]
+  },
+  "buttons": [
+    {
+      "caption": "Configure",
+      "action": "configure",
+      "settings": "main"
+    },
+    {
+      "caption": "Sync Now",
+      "action": "syncNow",
+      "confirmText": "Run sync now?",
+      "successText": "Sync completed successfully!"
+    }
+  ],
+  "onInstall": [
+    "installDependencies",
+    "setupSSHKey",
+    "getNodeInfo",
+    "checkIPType",
+    "copyPublicKeyToRemoteConditional",
+    "setupSyncScript",
+    "setupCronJob",
+    "testSync",
+    "showSuccessMessage"
+  ],
+  "onUninstall": [
+    "removePublicKeyFromRemote",
+    "removeCronJob",
+    "cleanupScripts"
+  ],
+  "actions": {
+    "installDependencies": {
+      "cmd [${targetNodes.nodeGroup}]": {
+        "commands": [
+          "command -v rsync >/dev/null 2>&1 || yum install -y rsync || apt-get install -y rsync"
+        ],
+        "user": "root"
+      }
+    },
+    "setupSSHKey": {
+      "cmd [${targetNodes.nodeGroup}]": {
+        "commands": [
+          "mkdir -p /root/.ssh",
+          "chmod 700 /root/.ssh",
+          "[ ! -f /root/.ssh/id_synchro ] && ssh-keygen -q -t rsa -b 4096 -f /root/.ssh/id_synchro -N '' -C 'synchro-addon' >/dev/null 2>&1 || true",
+          "cat /root/.ssh/id_synchro.pub"
+        ],
+        "user": "root"
+      },
+      "setGlobals": {
+        "publicKey": "${response.out}"
+      }
+    },
+    "getNodeInfo": {
+      "cmd [${targetNodes.nodeGroup}]": {
+        "commands": [
+          "hostname"
+        ],
+        "user": "root"
+      },
+      "setGlobals": {
+        "nodeName": "${response.out}"
+      }
+    },
+    "checkIPType": {
+      "script": [
+        "var remoteIP = '${settings.remoteIP}';",
+        "var parts = remoteIP.split('.');",
+        "var isInternal = false;",
+        "",
+        "// Check if valid IP format",
+        "if (parts.length === 4) {",
+        "  var first = parseInt(parts[0]);",
+        "  var second = parseInt(parts[1]);",
+        "  ",
+        "  // Check RFC 1918 private IP ranges:",
+        "  // 10.0.0.0/8 (10.0.0.0 to 10.255.255.255)",
+        "  // 172.16.0.0/12 (172.16.0.0 to 172.31.255.255)",
+        "  // 192.168.0.0/16 (192.168.0.0 to 192.168.255.255)",
+        "  if (first === 10) {",
+        "    isInternal = true;",
+        "  } else if (first === 172 && second >= 16 && second <= 31) {",
+        "    isInternal = true;",
+        "  } else if (first === 192 && second === 168) {",
+        "    isInternal = true;",
+        "  }",
+        "}",
+        "",
+        "return { result: 0, isInternal: isInternal };"
+      ],
+      "setGlobals": {
+        "isInternalIP": "${response.isInternal}"
+      }
+    },
+    "copyPublicKeyToRemoteConditional": {
+      "if (${globals.isInternalIP})": "copyPublicKeyToRemote"
+    },
+    "copyPublicKeyToRemote": [
+      {
+        "cmd [${targetNodes.nodeGroup}]": {
+          "commands": [
+            "ssh-keyscan -H ${settings.remoteIP} >> /root/.ssh/known_hosts 2>/dev/null || true"
+          ],
+          "user": "root"
+        }
+      },
+      {
+        "script": [
+          "var remoteIP = '${settings.remoteIP}';",
+          "var publicKey = '${globals.publicKey}';",
+          "",
+          "// Get all environments to find the one containing the remote IP",
+          "var envsResp = jelastic.env.control.GetEnvs();",
+          "if (envsResp.result != 0) {",
+          "  return { result: envsResp.result, error: 'Failed to get environments: ' + (envsResp.error || '') };",
+          "}",
+          "",
+          "var envs = envsResp.infos || [];",
+          "var remoteEnv = null;",
+          "var remoteNodeId = null;",
+          "",
+          "// Search through all environments to find the one with matching IP",
+          "for (var e = 0; e < envs.length; e++) {",
+          "  var envName = envs[e].env.envName || envs[e].env.domain;",
+          "  ",
+          "  // Extract short name if it's a domain (e.g., 'env-6601641' from 'env-6601641.dma-paas.nl')",
+          "  if (envName.indexOf('.') > -1) {",
+          "    envName = envName.split('.')[0];",
+          "  }",
+          "  ",
+          "  var resp = jelastic.env.control.GetEnvInfo(envName, session);",
+          "  if (resp.result != 0) continue;",
+          "  ",
+          "  var nodes = resp.nodes || [];",
+          "  ",
+          "  // Check if any node in this environment matches the IP",
+          "  for (var i = 0; i < nodes.length; i++) {",
+          "    if (nodes[i].intIP == remoteIP || nodes[i].address == remoteIP) {",
+          "      remoteEnv = envName;",
+          "      remoteNodeId = nodes[i].id;",
+          "      break;",
+          "    }",
+          "  }",
+          "  ",
+          "  if (remoteNodeId) break;",
+          "}",
+          "",
+          "if (!remoteNodeId) {",
+          "  return { result: 1, error: 'Remote node not found with IP: ' + remoteIP + '. Please ensure you have access to the environment.' };",
+          "}",
+          "",
+          "var cmd = 'mkdir -p /root/.ssh && chmod 700 /root/.ssh && echo \"' + publicKey.trim() + '\" >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys && sort -u /root/.ssh/authorized_keys -o /root/.ssh/authorized_keys';",
+          "",
+          "return jelastic.env.control.ExecCmdById(",
+          "  remoteEnv,",
+          "  session,",
+          "  remoteNodeId,",
+          "  toJSON([{ command: cmd }]),",
+          "  true,",
+          "  'root'",
+          ");"
+        ]
+      }
+    ],
+    "setupSyncScript": {
+      "cmd [${targetNodes.nodeGroup}]": {
+        "commands": [
+          "curl -fsSL ${baseUrl}scripts/synchro-sync.sh -o /usr/local/bin/synchro-sync.sh",
+          "sed -i \"s|__SYNC_FOLDER__|${settings.syncFolder}|g\" /usr/local/bin/synchro-sync.sh",
+          "sed -i \"s|__LOCAL_OWNER__|${settings.localOwner}|g\" /usr/local/bin/synchro-sync.sh",
+          "sed -i \"s|__REMOTE_SYNC_FOLDER__|${settings.remoteSyncFolder}|g\" /usr/local/bin/synchro-sync.sh",
+          "sed -i \"s|__SYNC_DIRECTION__|${settings.syncDirection}|g\" /usr/local/bin/synchro-sync.sh",
+          "sed -i \"s|__REMOTE_IP__|${settings.remoteIP}|g\" /usr/local/bin/synchro-sync.sh",
+          "sed -i \"s|__REMOTE_USER__|${settings.remoteUser}|g\" /usr/local/bin/synchro-sync.sh",
+          "chmod +x /usr/local/bin/synchro-sync.sh"
+        ],
+        "user": "root"
+      }
+    },
+    "setupCronJob": {
+      "script": [
+        "var syncMode = '${settings.syncMode}';",
+        "var syncInterval = '${settings.syncInterval}';",
+        "var nodeGroup = '${targetNodes.nodeGroup}';",
+        "",
+        "var cmd = '';",
+        "if (syncMode == 'automatic') {",
+        "  cmd = '(crontab -l 2>/dev/null | grep -v \\'synchro-sync.sh\\'; echo \\'*/' + syncInterval + ' * * * * /usr/local/bin/synchro-sync.sh\\') | crontab - && echo \\'Cron job installed: sync every ' + syncInterval + ' minutes\\'';",
+        "} else {",
+        "  cmd = 'crontab -l 2>/dev/null | grep -v \\'synchro-sync.sh\\' | crontab - || true && echo \\'One-time sync mode: cron job removed\\'';",
+        "}",
+        "",
+        "return jelastic.env.control.ExecCmdByGroup(",
+        "  '${env.envName}',",
+        "  session,",
+        "  nodeGroup,",
+        "  toJSON([{ command: cmd }]),",
+        "  true,",
+        "  false,",
+        "  'root'",
+        ");"
+      ]
+    },
+    "testSync": {
+      "cmd [${targetNodes.nodeGroup}]": {
+        "commands": [
+          "/usr/local/bin/synchro-sync.sh || echo 'Initial sync attempted. Check /var/log/synchro-addon.log for details.'"
+        ],
+        "user": "root"
+      }
+    },
+    "removePublicKeyFromRemote": {
+      "cmd [${targetNodes.nodeGroup}]": {
+        "commands": [
+          "ssh -i /root/.ssh/id_synchro -o StrictHostKeyChecking=no ${settings.remoteUser}@${settings.remoteIP} \"sed -i '/synchro-addon/d' ~/.ssh/authorized_keys\" 2>/dev/null || true"
+        ],
+        "user": "root"
+      }
+    },
+    "removeCronJob": {
+      "cmd [${targetNodes.nodeGroup}]": {
+        "commands": [
+          "crontab -l 2>/dev/null | grep -v 'synchro-sync.sh' | crontab - || true",
+          "echo 'Cron job removed'"
+        ],
+        "user": "root"
+      }
+    },
+    "cleanupScripts": {
+      "cmd [${targetNodes.nodeGroup}]": {
+        "commands": [
+          "rm -f /usr/local/bin/synchro-sync.sh",
+          "echo 'Cleanup completed. SSH key kept at /root/.ssh/id_synchro for reuse.'"
+        ],
+        "user": "root"
+      }
+    },
+    "configure": [
+      "setupSyncScript",
+      "setupCronJob",
+      {
+        "script": [
+          "var syncMode = '${settings.syncMode}';",
+          "var syncInterval = '${settings.syncInterval}';",
+          "var syncDirection = '${settings.syncDirection}';",
+          "var localOwner = '${settings.localOwner}';",
+          "var directionText = syncDirection == 'from' ? 'FROM local TO remote' : 'FROM remote TO local';",
+          "var modeText = syncMode == 'onetime' ? 'One-time sync only' : 'Automatic every ' + syncInterval + ' minutes';",
+          "",
+          "var message = 'Configuration updated successfully!\\n\\n';",
+          "message += 'New settings:\\n';",
+          "message += '- Folder on local: ${settings.syncFolder}\\n';",
+          "if (localOwner && localOwner.trim()) {",
+          "  message += '- Local owner: ' + localOwner + ' (will chown after sync TO local)\\n';",
+          "}",
+          "message += '- Folder on remote: ${settings.remoteSyncFolder}\\n';",
+          "message += '- Direction: ' + directionText + '\\n';",
+          "message += '- Sync mode: ' + modeText + '\\n';",
+          "message += '- Remote IP: ${settings.remoteIP}\\n';",
+          "message += '- Remote User: ${settings.remoteUser}';",
+          "",
+          "return { result: 0, message: message };"
+        ],
+        "return": {
+          "type": "success",
+          "message": "${response.message}"
+        }
+      }
+    ],
+    "syncNow": [
+      {
+        "cmd [${targetNodes.nodeGroup}]": {
+          "commands": [
+            "/usr/local/bin/synchro-sync.sh"
+          ],
+          "user": "root"
+        }
+      },
+      {
+        "return": {
+          "type": "success",
+          "message": "Sync completed successfully!\n\nCheck sync log for details: /var/log/synchro-addon.log"
+        }
+      }
+    ],
+    "showSuccessMessage": {
+      "script": [
+        "var isInternal = ${globals.isInternalIP};",
+        "var publicKey = '${globals.publicKey}'.trim();",
+        "var nodeName = '${globals.nodeName}'.trim();",
+        "var syncFolder = '${settings.syncFolder}';",
+        "var localOwner = '${settings.localOwner}';",
+        "var remoteSyncFolder = '${settings.remoteSyncFolder}';",
+        "var syncDirection = '${settings.syncDirection}';",
+        "var syncMode = '${settings.syncMode}';",
+        "var syncInterval = '${settings.syncInterval}';",
+        "var remoteIP = '${settings.remoteIP}';",
+        "var remoteUser = '${settings.remoteUser}';",
+        "",
+        "var directionText = syncDirection == 'from' ? 'FROM local TO remote' : 'FROM remote TO local';",
+        "var modeText = syncMode == 'onetime' ? 'One-time sync only' : 'Automatic every ' + syncInterval + ' minutes';",
+        "",
+        "var message = 'Synchro Add-on installed successfully!\\n\\n';",
+        "message += 'Configuration:\\n';",
+        "message += '- Installed on: ' + nodeName + '\\n';",
+        "message += '- Folder on local: ' + syncFolder + '\\n';",
+        "if (localOwner && localOwner.trim()) {",
+        "  message += '- Local owner: ' + localOwner + ' (will chown after sync TO local)\\n';",
+        "}",
+        "message += '- Folder on remote: ' + remoteSyncFolder + '\\n';",
+        "message += '- Direction: ' + directionText + '\\n';",
+        "message += '- Sync mode: ' + modeText + '\\n';",
+        "message += '- Remote IP: ' + remoteIP + '\\n';",
+        "message += '- Remote User: ' + remoteUser + '\\n';",
+        "",
+        "if (!isInternal) {",
+        "  message += '\\n--- PUBLIC IP DETECTED ---\\n';",
+        "  message += 'Manual SSH key installation required:\\n\\n';",
+        "  message += '1. Ensure port 22 is accessible on ' + remoteIP + '\\n';",
+        "  message += '2. Add this public key to ~/.ssh/authorized_keys in the home of the remote user on the remote node:\\n\\n';",
+        "  message += publicKey + '\\n';",
+        "}",
+        "",
+        "message += '\\nSync script: /usr/local/bin/synchro-sync.sh\\n';",
+        "message += 'Sync log: /var/log/synchro-addon.log';",
+        "",
+        "return { result: 0, message: message };"
+      ],
+      "setGlobals": {
+        "successMessage": "${response.message}"
+      }
+    }
+  },
+  "success": "${globals.successMessage}"
+}
