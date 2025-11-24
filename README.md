@@ -1,22 +1,23 @@
 # Synchro Add-on
 
-A Jelastic JPS add-on that synchronizes files between nodes using rsync over SSH.
+A Jelastic JPS add-on that synchronizes files from a source node to a destination node using rsync over SSH.
 
-**Current Version:** v1.9.2
+**Current Version:** v3.0.1
 
-**Repository:** https://github.com/shaundma/synchro-addon
+**Repository:** https://github.com/shaundma/synchro-add-on-v3
 
 **Installation URL:**
 ```
-https://raw.githubusercontent.com/shaundma/synchro-addon/master/manifest.jps
+https://raw.githubusercontent.com/shaundma/synchro-add-on-v3/master/manifest.jps
 ```
 
 ## Features
 
-- ✅ **Bidirectional sync** - Sync FROM local TO remote or FROM remote TO local
+- ✅ **Source to Destination sync** - Simple, unidirectional sync from source to destination
+- ✅ **Keep existing files option** - Choose whether to preserve or delete extra files in destination
 - ✅ **Flexible sync modes** - One-time sync or automatic recurring sync
-- ✅ **Separate folder paths** - Sync between different folders on local and remote
-- ✅ **Automatic ownership** - Optional chown of local folder after sync TO local completes
+- ✅ **Separate folder paths** - Sync between different folders on source and destination
+- ✅ **Automatic ownership** - Optional chown of destination folder after sync completes
 - ✅ **Private & Public IPs** - Supports both private network IPs and external servers
 - ✅ **Auto environment discovery** - Automatically finds the environment from IP address
 - ✅ **Configure button** - Update settings without reinstalling
@@ -31,22 +32,22 @@ https://raw.githubusercontent.com/shaundma/synchro-addon/master/manifest.jps
 1. In Jelastic, click **Import** from the top menu
 2. Paste the installation URL
 3. Fill in the form:
-   - **Folder on local** - Path on the node where add-on is installed
-   - **Local owner** - Optional: Local user to chown folder after sync TO local (e.g. jelastic)
-   - **Folder on remote** - Path on the remote node
-   - **Sync Direction** - FROM local TO remote, or FROM remote TO local
-   - **Remote User** - Username on remote node (default: root)
-   - **Remote Node IP Address** - IP address of remote node
+   - **Source Node IP Address** - IP address of the source node
+   - **Source Folder** - Path on the source node
+   - **Source User** - Username on source node (default: root)
+   - **Destination Folder** - Path on the destination node (where add-on is installed)
+   - **Destination User** - Optional: User to chown folder after sync (e.g. jelastic)
+   - **Keep existing files** - Preserve files in destination not present in source (default: enabled)
    - **Sync Mode** - One-time sync only (default) or automatic recurring
    - **Every (minutes)** - Minutes between syncs (for automatic mode)
-4. Select **Environment** and **Nodes** (the local node where add-on will be installed)
+4. Select **Environment** and **Nodes** (the destination node where add-on will be installed)
 5. Click **Install**
 
 ### Private Network IPs
 
 For private network IPs (RFC 1918: 10.x.x.x, 172.16-31.x.x, 192.168.x.x):
 - Automatic environment discovery via Jelastic API
-- SSH key is automatically distributed to remote node
+- SSH key is automatically distributed to source node
 - No manual setup required
 - Sync starts immediately
 
@@ -54,7 +55,7 @@ For private network IPs (RFC 1918: 10.x.x.x, 172.16-31.x.x, 192.168.x.x):
 
 For public IP addresses or external servers:
 - Installation provides the public key
-- Manually add the key to `~/.ssh/authorized_keys` for the specified remote user
+- Manually add the key to `~/.ssh/authorized_keys` for the specified source user
 - Ensure port 22 is accessible
 - Use "Sync Now" button to test connection
 
@@ -62,7 +63,7 @@ For public IP addresses or external servers:
 
 After installation, you'll see two buttons in Application → Add-Ons:
 
-- **Configure** - Change any settings (folders, direction, interval, IP, sync mode)
+- **Configure** - Change any settings (folders, users, interval, IP, sync mode, keep existing)
 - **Sync Now** - Manually trigger an immediate sync
 
 ## Sync Modes
@@ -80,17 +81,29 @@ After installation, you'll see two buttons in Application → Add-Ons:
 - Default interval: every 15 minutes
 - Can still use "Sync Now" for immediate sync between scheduled runs
 
+## Keep Existing Files Option
+
+### Enabled (Default)
+- Files in destination that don't exist in source are preserved
+- Rsync runs without `--delete` flag
+- Safer option - no data loss
+
+### Disabled
+- Files in destination that don't exist in source are deleted
+- Rsync runs with `--delete` flag
+- Perfect mirror of source folder
+
 ## File Locations
 
-**On local node (where add-on is installed):**
+**On destination node (where add-on is installed):**
 - SSH private key: `/root/.ssh/id_synchro`
 - SSH public key: `/root/.ssh/id_synchro.pub`
 - Sync script: `/usr/local/bin/synchro-sync.sh`
 - Sync log: `/var/log/synchro-addon.log`
 - Cron job: `crontab -l` (if automatic mode)
 
-**On remote node:**
-- Authorized keys: `/root/.ssh/authorized_keys` (contains local's public key)
+**On source node:**
+- Authorized keys: `~/.ssh/authorized_keys` (contains destination's public key)
 - Synced folder: Your configured path
 
 ## Testing & Troubleshooting
@@ -108,7 +121,7 @@ Should show: `*/15 * * * * /usr/local/bin/synchro-sync.sh` (or your interval)
 
 ### Test SSH connectivity
 ```bash
-ssh -i /root/.ssh/id_synchro root@REMOTE_IP echo "test"
+ssh -i /root/.ssh/id_synchro SOURCE_USER@SOURCE_IP echo "test"
 ```
 
 ### Check sync log
@@ -124,20 +137,40 @@ tail -f /var/log/synchro-addon.log
 ### Test file sync
 ```bash
 # Create test file on source
-echo "test" > /path/to/local/folder/test.txt
+ssh -i /root/.ssh/id_synchro SOURCE_USER@SOURCE_IP "echo 'test' > /path/to/source/folder/test.txt"
 
 # Wait for sync or click "Sync Now"
 
-# Check on remote
-ssh -i /root/.ssh/id_synchro root@REMOTE_IP cat /path/to/remote/folder/test.txt
+# Check on destination
+cat /path/to/destination/folder/test.txt
 ```
 
 ## Version History
 
+### v3.0.1 (2025-11-24)
+- Improved form field ordering for better logical flow
+- Updated field labels for consistency:
+  - "Remote IP Address" → "Source Node IP Address"
+  - "Remote User" → "Source User"
+  - "Destination owner" → "Destination User"
+- Changed "Keep existing files" default to enabled (safer default)
+- Updated all messages to use consistent source/destination terminology
+
+### v2.0.0 (2025-11-24)
+- **BREAKING CHANGE:** Removed bidirectional sync
+- Now always syncs FROM source TO destination (simplified workflow)
+- Renamed form fields for clarity:
+  - "Folder on local" → "Destination Folder"
+  - "Local owner" → "Destination User"
+  - "Folder on remote" → "Source Folder"
+- Added "Keep existing files" checkbox to control rsync `--delete` flag
+- Updated sync script to always sync from remote (source) to local (destination)
+- Removed sync direction selector
+
 ### v1.9.2 (2025-11-13)
 - Added --no-owner --no-group flags to rsync commands
 - Prevents rsync from re-syncing files due to ownership changes
-- Necessary when using Local owner chown feature
+- Necessary when using Destination User chown feature
 
 ### v1.9.1 (2025-11-13)
 - Fixed Configure button cron job installation
@@ -145,24 +178,24 @@ ssh -i /root/.ssh/id_synchro root@REMOTE_IP cat /path/to/remote/folder/test.txt
 - Now correctly installs/removes cron job when switching between modes
 
 ### v1.9.0 (2025-11-13)
-- Added Local owner field (optional)
-- Automatic chown -R of local folder after sync TO local completes
-- Only runs chown if Local owner is specified and sync direction is TO local
-- Updated success messages to show local owner configuration
+- Added Destination User field (optional)
+- Automatic chown -R of destination folder after sync completes
+- Only runs chown if Destination User is specified
+- Updated success messages to show destination user configuration
 
 ### v1.8.2 (2025-11-13)
 - Improved public IP SSH key installation instructions
-- Changed to generic "~/.ssh/authorized_keys in the home of the remote user" wording
+- Changed to generic "~/.ssh/authorized_keys in the home of the source user" wording
 
 ### v1.8.1 (2025-11-13)
-- Reordered form fields: Remote User now appears above Remote Node IP Address
+- Reordered form fields: Source User now appears above Source Node IP Address
 - Updated README to reflect new field order
 
 ### v1.8.0 (2025-11-13)
-- Added Remote User field with default "root"
+- Added Source User field with default "root"
 - Support for non-root SSH connections
-- Updated sync script to use configurable remote user
-- Updated success messages to show remote user
+- Updated sync script to use configurable source user
+- Updated success messages to show source user
 - Updated SSH key removal to work with any user
 
 ### v1.7.2 (2025-11-13)
@@ -178,7 +211,7 @@ ssh -i /root/.ssh/id_synchro root@REMOTE_IP cat /path/to/remote/folder/test.txt
 
 ### v1.7.0 (2025-11-13)
 - Reordered form fields for better flow
-- Remote Node IP Address moved above Sync Mode section
+- Source Node IP Address moved above Sync Mode section
 - Better logical grouping of connection and sync settings
 
 ### v1.6.9 (2025-11-13)
@@ -239,8 +272,8 @@ ssh -i /root/.ssh/id_synchro root@REMOTE_IP cat /path/to/remote/folder/test.txt
 ### v1.3.x (2025-11-13)
 - Removed Remote Environment selector
 - Auto-discover environment from IP address
-- Added separate folder paths for local and remote
-- Changed "target" terminology to "local" for clarity
+- Added separate folder paths for source and destination
+- Changed "target" terminology to "destination" for clarity
 - Default sync interval changed to 15 minutes
 - Show actual node hostname in success message
 
@@ -259,10 +292,12 @@ Main JPS file containing:
 
 ### scripts/synchro-sync.sh
 Template sync script with placeholders:
-- `__SYNC_FOLDER__` - Local folder path
-- `__REMOTE_SYNC_FOLDER__` - Remote folder path
-- `__SYNC_DIRECTION__` - "from" or "to"
-- `__REMOTE_IP__` - Remote node IP
+- `__SYNC_FOLDER__` - Destination folder path
+- `__LOCAL_OWNER__` - Destination user (for chown)
+- `__REMOTE_SYNC_FOLDER__` - Source folder path
+- `__KEEP_EXISTING__` - Keep existing files flag (true/false)
+- `__REMOTE_IP__` - Source node IP
+- `__REMOTE_USER__` - Source user
 
 Replaced during installation via `sed`.
 
@@ -275,9 +310,10 @@ Replaced during installation via `sed`.
 - For public IPs: User manually installs
 
 ### Sync Script
-- Uses rsync with `--delete` flag (mirror mode)
+- Uses rsync with optional `--delete` flag (controlled by "Keep existing files")
 - Logs all operations to `/var/log/synchro-addon.log`
-- Bidirectional support via direction parameter
+- Always syncs FROM source (remote) TO destination (local)
+- Conditionally applies chown if Destination User is specified
 
 ### Cron Job (Automatic Mode)
 - Single-line installation command
@@ -295,7 +331,7 @@ Replaced during installation via `sed`.
 
 ### Local Testing
 ```bash
-cd /srv/www/claude/synchro-add-on-v2
+cd /srv/www/claude/synchro-add-on-v3
 # Make changes to manifest.jps or scripts/synchro-sync.sh
 git add .
 git commit -m "Description"
@@ -305,17 +341,17 @@ git push origin master
 ### Cache-Busting
 Use timestamp in URL for testing:
 ```
-https://raw.githubusercontent.com/shaundma/synchro-addon/master/manifest.jps?t=20251113192
+https://raw.githubusercontent.com/shaundma/synchro-add-on-v3/master/manifest.jps?t=20251124001
 ```
 
 ## Use Cases
 
-- **Development environments** - Sync code from dev to staging
+- **Development environments** - Sync code from staging to production
 - **Backup synchronization** - Copy files to backup node
-- **Content deployment** - Push content updates to production
-- **Multi-site sync** - Keep multiple sites in sync
-- **Database dumps** - Sync backup files between nodes
-- **Log aggregation** - Collect logs from multiple nodes
+- **Content deployment** - Push content updates from source to production
+- **Multi-site sync** - Keep multiple destination sites in sync with source
+- **Database dumps** - Sync backup files from source to destination nodes
+- **Log aggregation** - Collect logs from source nodes to centralized destination
 
 ## License
 
@@ -324,5 +360,5 @@ See LICENSE.md
 ## Support
 
 For issues, feature requests, or questions:
-- **GitHub Issues:** https://github.com/shaundma/synchro-addon/issues
+- **GitHub Issues:** https://github.com/shaundma/synchro-add-on-v3/issues
 - **Jelastic Docs:** https://docs.jelastic.com/jps/
