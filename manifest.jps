@@ -5,9 +5,9 @@
   "name": "Synchro Add-on v3.0.1",
   "version": "3.0.1",
   "logo": "images/icon.png",
-  "homepage": "https://github.com/shaundma/synchro-addon",
+  "homepage": "https://github.com/shaundma/synchro-add-on-v3",
   "description": "Synchronize files and folders between nodes using rsync",
-  "baseUrl": "https://raw.githubusercontent.com/shaundma/synchro-addon/master/",
+  "baseUrl": "https://raw.githubusercontent.com/shaundma/synchro-add-on-v3/master/",
   "targetNodes": {
     "nodeType": ["storage", "apache", "apache2", "nodejs", "apache-ruby", "apache-python", "nginxruby", "nginxphp", "nginxphp-dockerized", "tomcat6", "tomcat7", "tomcat8", "tomcat85", "tomcat9", "tomcat", "tomee", "tomee-dockerized", "litespeedphp", "llsmp", "lemp", "jetty", "mariadb", "mariadb10", "mysql5", "mysql8", "postgres", "postgresql", "docker", "centos-vps", "ubuntu-vps", "debian-vps", "memcached", "redis", "mongodb"]
   },
